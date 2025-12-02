@@ -39,7 +39,7 @@ class HubertDataset(torch.utils.data.Dataset):
         row = self.df.iloc[idx]
         
         # HuBERT特徴量をファイルから読み込み
-        data = torch.load(row['feature'], map_location='cpu')
+        data = torch.load(row['hubert'], map_location='cpu')
         hubert = data['hubert_feats']
 
         # このサンプルに対する全ての正解ラベルを辞書として準備
