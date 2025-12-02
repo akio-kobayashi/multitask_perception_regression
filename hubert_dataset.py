@@ -41,8 +41,8 @@ class HubertDataset(torch.utils.data.Dataset):
         # HuBERT特徴量をファイルから読み込み
         loaded_data = torch.load(row['hubert'], map_location='cpu')
         
-        if isinstance(loaded_data, dict) and 'hubert_feats' in loaded_data:
-            hubert = loaded_data['hubert_feats']
+        if isinstance(loaded_data, dict) and 'hubert' in loaded_data:
+            hubert = loaded_data['hubert']
         elif isinstance(loaded_data, torch.Tensor):
             hubert = loaded_data # テンソルそのものが保存されている場合
         else:
