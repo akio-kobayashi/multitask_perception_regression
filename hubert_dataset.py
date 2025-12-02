@@ -40,7 +40,7 @@ class HubertDataset(torch.utils.data.Dataset):
         
         # HuBERT特徴量をファイルから読み込み
         data = torch.load(row['hubert'], map_location='cpu')
-        hubert = data['hubert_feats']
+        hubert = data['hubert']
 
         # このサンプルに対する全ての正解ラベルを辞書として準備
         labels_dict = {}
