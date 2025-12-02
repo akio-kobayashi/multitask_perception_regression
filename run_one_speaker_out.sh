@@ -3,9 +3,10 @@
 # --- Configuration ---
 # ベースとなる設定ファイル (例: configs/config_intel_nat_cbs.yml)
 # 必要に応じて変更してください
-BASE_CONFIG="configs/config_intel_nat_cbs.yml" 
+TAG="intel_nat_cbs"
+BASE_CONFIG=configs/config_${TAG}.yml 
 MAIN_DATA_CSV="hubert_with_listeners.csv"      # メインのデータセットCSV
-OUTPUT_ROOT_DIR="one_speaker_out_runs"         # 各実行結果を保存するルートディレクトリ
+OUTPUT_ROOT_DIR=one_speaker_out_runs/${TAG}    # 各実行結果を保存するルートディレクトリ
 
 # --- Create output root directory ---
 mkdir -p "$OUTPUT_ROOT_DIR"
@@ -13,7 +14,7 @@ mkdir -p "$OUTPUT_ROOT_DIR"
 # --- Get unique speakers from the main data CSV ---
 echo "Extracting unique speakers from $MAIN_DATA_CSV..."
 # Pythonを使ってユニークな話者リストを取得
-UNIQUE_SPEAKERS=$(python -c "
+UNIQUE_SPEAKERS=$(python3 -c "
 import pandas as pd
 import os
 
@@ -74,7 +75,7 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
 
     # 1. Split data
     echo "Splitting data for $TARGET_SPEAKER..."
-    python "$SPLIT_SCRIPT" \
+    python3 "$SPLIT_SCRIPT" \
         --input_csv "$MAIN_DATA_CSV" \
         --output_train_csv "$TRAIN_CSV" \
         --output_valid_csv "$VALID_CSV" \
@@ -102,7 +103,7 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
 
     # 3. Run training
     echo "Starting training for $TARGET_SPEAKER (output to $RUN_OUTPUT_DIR/logs)..."
-    python source/hubert_train.py --config "$TEMP_CONFIG"
+    python3 hubert_train.py --config "$TEMP_CONFIG"
 
     echo "--- Finished processing speaker: $TARGET_SPEAKER ---"
 done
