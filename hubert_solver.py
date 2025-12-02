@@ -3,7 +3,7 @@ from torch import Tensor
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from typing import Dict
+from typing import Dict, Any
 
 import loss # coral_loss を含む loss.py を想定
 from hubert_model import MultiTaskHubertModel, logits_to_rank # 新しいモデルとヘルパー関数
