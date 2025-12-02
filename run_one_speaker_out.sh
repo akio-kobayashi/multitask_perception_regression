@@ -72,7 +72,8 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
     TRAIN_CSV="$RUN_OUTPUT_DIR/train_${TARGET_SPEAKER}.csv"
     VALID_CSV="$RUN_OUTPUT_DIR/valid_${TARGET_SPEAKER}.csv"
     TEMP_CONFIG="$RUN_OUTPUT_DIR/config_${TARGET_SPEAKER}.yml"
-
+    PREDICTIONS_CSV="${RUN_OUTPUT_DIR}/predictions_${TARGET_SPEAKER}.csv"
+    
     # 1. Split data
     echo "Splitting data for $TARGET_SPEAKER..."
     python3 "$SPLIT_SCRIPT" \
@@ -92,12 +93,14 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
         sed -i '' "s|name: multi_task_hubert|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
         sed -i '' "s|dirpath: \"checkpoints\"|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
         sed -i '' "s|save_dir: \"logs\"|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
+	sed -i '' "s|predictions_path: .*|predictions_path: ${PREDICTIONS_CSV}|" "$TEMP_CONFIG"
     else # Linux など
         sed -i "s|train_path: .*|train_path: ${TRAIN_CSV}|" "$TEMP_CONFIG"
         sed -i "s|valid_path: .*|valid_path: ${VALID_CSV}|" "$TEMP_CONFIG"
         sed -i "s|name: multi_task_hubert|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
         sed -i "s|dirpath: \"checkpoints\"|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
         sed -i "s|save_dir: \"logs\"|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
+	sed -i "s|predictions_path: .*|predictions_path: ${PREDICTIONS_CSV}|" "$TEMP_CONFIG"	
     fi
 
 
