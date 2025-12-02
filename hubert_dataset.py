@@ -41,12 +41,19 @@ class HubertDataset(torch.utils.data.Dataset):
         # HuBERT特徴量をファイルから読み込み
         loaded_data = torch.load(row['hubert'], map_location='cpu')
         
-        if isinstance(loaded_data, dict) and 'hubert' in loaded_data:
-            hubert = loaded_data['hubert']
+        # ★修正点: 'hubert' キーを優先してチェックする ★
+        if isinstance(loaded_data, dict):
+            if 'hubert' in loaded_data: # まず 'hubert' キーをチェック
+                hubert = loaded_data['hubert']
+            elif 'hubert_feats' in loaded_data: # 次に 'hubert_feats' キーをチェック
+                hubert = loaded_data['hubert_feats']
+            else:
+                raise ValueError(f"HuBERT特徴量ファイル '{row['hubert']}' は辞書ですが、'hubert'または'hubert_feats'キーがありません。")
         elif isinstance(loaded_data, torch.Tensor):
             hubert = loaded_data # テンソルそのものが保存されている場合
         else:
-            raise ValueError(f"HuBERT特徴量ファイル '{row['hubert']}' の形式が不明です。辞書に'hubert_feats'キーがないか、テンソルではありません。")
+            raise ValueError(f"HuBERT特徴量ファイル '{row['hubert']}' の形式が不明です。辞書でもテンソルでもありません。")
+
 
         # このサンプルに対する全ての正解ラベルを辞書として準備
         labels_dict = {}

@@ -62,7 +62,7 @@ class LitHubert(pl.LightningModule):
 
     def training_step(self, batch, batch_idx: int) -> Tensor:
         # バッチから特徴量とラベルの辞書を取得
-        huberts, labels_dict, lengths = batch
+        huberts, labels_dict, lengths, indices = batch
         
         logits_dict = self.forward(huberts)
         total_loss, loss_dict = self._calculate_loss(logits_dict, labels_dict)
@@ -75,7 +75,7 @@ class LitHubert(pl.LightningModule):
         return total_loss
 
     def validation_step(self, batch, batch_idx: int) -> None:
-        huberts, labels_dict, lengths = batch
+        huberts, labels_dict, lengths, indices = batch
         
         logits_dict = self.forward(huberts)
         total_loss, loss_dict = self._calculate_loss(logits_dict, labels_dict)
@@ -128,7 +128,7 @@ class LitHubert(pl.LightningModule):
         self.validation_step_outputs.clear() # メモリを解放
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Dict[str, Tensor]:
-        huberts, labels_dict, lengths = batch
+        huberts, labels_dict, lengths, indices = batch
         logits_dict = self.forward(huberts)
         
         predictions = {}
