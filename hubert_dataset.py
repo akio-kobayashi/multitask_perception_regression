@@ -35,12 +35,18 @@ class HubertDataset(torch.utils.data.Dataset):
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int) -> Tuple[Tensor, Dict[str, Any]]:
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Dict[str, Any], int]: # Added int for idx
         row = self.df.iloc[idx]
         
         # HuBERT特徴量をファイルから読み込み
-        data = torch.load(row['hubert'], map_location='cpu')
-        hubert = data['hubert']
+        loaded_data = torch.load(row['hubert'], map_location='cpu')
+        
+        if isinstance(loaded_data, dict) and 'hubert_feats' in loaded_data:
+            hubert = loaded_data['hubert_feats']
+        elif isinstance(loaded_data, torch.Tensor):
+            hubert = loaded_data # テンソルそのものが保存されている場合
+        else:
+            raise ValueError(f"HuBERT特徴量ファイル '{row['hubert']}' の形式が不明です。辞書に'hubert_feats'キーがないか、テンソルではありません。")
 
         # このサンプルに対する全ての正解ラベルを辞書として準備
         labels_dict = {}
@@ -63,22 +69,23 @@ class HubertDataset(torch.utils.data.Dataset):
             cbs_labels = row[self.cb_columns].values.astype(bool)
             labels_dict['cbs'] = torch.tensor(cbs_labels, dtype=torch.bool)
 
-        return hubert, labels_dict
+        return hubert, labels_dict, idx # Added idx to return
 
-def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Dict[str, Any]):
+def data_processing(batch: List[Tuple[Tensor, Dict[str, Any], int]], tasks_config: Dict[str, Any]): # Added int to Tuple
     """
     マルチタスク学習用にデータを整形（collate）する関数。
     """
-    huberts, lengths = [], []
+    huberts, lengths, indices = [], [], [] # Added indices
     # 各タスクのラベルを一時的に保持するリストの辞書を初期化
     labels_lists = {task_name: [] for task_name in tasks_config}
     if 'intelligibility' in tasks_config: labels_lists['intelligibility_rank'] = []
     if 'naturalness' in tasks_config: labels_lists['naturalness_rank'] = []
 
     # バッチ内の各サンプルをループ
-    for hubert_feats, labels_dict in batch:
+    for hubert_feats, labels_dict, idx in batch: # Added idx
         lengths.append(hubert_feats.shape[0])
         huberts.append(hubert_feats)
+        indices.append(idx) # Collect indices
         
         for task_name, label_value in labels_dict.items():
             if task_name in labels_lists:
@@ -87,6 +94,7 @@ def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Di
     # 特徴量と長さをテンソルに変換
     lengths_tensor = torch.tensor(lengths, dtype=torch.long)
     huberts_tensor = nn.utils.rnn.pad_sequence(huberts, batch_first=True)
+    indices_tensor = torch.tensor(indices, dtype=torch.long) # Batch indices
 
     # ラベルをタスクタイプに応じて適切なテンソル形式に変換
     batched_labels = {}
@@ -106,4 +114,4 @@ def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Di
                 batched_labels[task_name] = torch.stack(labels)
 
     # 最終的にモデルに渡す形式
-    return huberts_tensor, batched_labels, lengths_tensor
+    return huberts_tensor, batched_labels, lengths_tensor, indices_tensor # Added indices_tensor

@@ -127,6 +127,19 @@ class LitHubert(pl.LightningModule):
             
         self.validation_step_outputs.clear() # メモリを解放
 
+    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Dict[str, Tensor]:
+        huberts, labels_dict, lengths = batch
+        logits_dict = self.forward(huberts)
+        
+        predictions = {}
+        for task_name, task_cfg in self.tasks.items():
+            logits = logits_dict[task_name]
+            if task_cfg['type'] == 'ordinal':
+                predictions[task_name] = logits_to_rank(logits)
+            elif task_cfg['type'] == 'multi_label':
+                predictions[task_name] = (torch.sigmoid(logits) > 0.5).int() # Convert bool to int (0 or 1)
+        return predictions
+
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {})
         optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)

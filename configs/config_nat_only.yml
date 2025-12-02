@@ -14,7 +14,7 @@ logger:
   name: "multi_task_hubert"
   version: 0 # Will be incremented by Lightning if directory exists
 trainer:
-  max_epochs: 10
+  max_epochs: 50
   gradient_clip_val: 1.0
 optimizer:
   lr: 0.001
@@ -35,3 +35,5 @@ model:
       type: 'ordinal'
       params:
         num_classes: 9
+evaluation:
+  predictions_path: "predictions_nat_only.csv"
