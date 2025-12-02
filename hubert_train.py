@@ -13,8 +13,9 @@ import yaml
 from argparse import ArgumentParser
 from string import Template
 import warnings
-warnings.filterwarnings('ignore')
-
+# pkg_resourcesの非推奨警告を抑制
+warnings.filterwarnings('ignore', 'pkg_resources is deprecated as an API', UserWarning)
+warnings.filterwarnings('ignore') # 他の警告も引き続き抑制
 
 def load_config(path: str) -> dict:
     raw = open(path, 'r', encoding='utf-8').read()
