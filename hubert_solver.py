@@ -1,108 +1,83 @@
+import os
 import torch
 from torch import Tensor
-import torch.nn.functional as F
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from typing import Dict, Any
-
-import loss as loss_utils
-from hubert_model import MultiTaskHubertModel, logits_to_rank
+import coral_loss
+import corn_loss
+from hubert_model import (
+    HubertOrdinalRegressionModel,
+    AttentionHubertOrdinalRegressionModel,
+    HubertCornModel,
+    AttentionHubertCornModel
+)
 
 class LitHubert(pl.LightningModule):
     """
-    A robust, simplified multi-task solver.
-    It loops through configured tasks and applies the correct loss.
+    PyTorch Lightning solver for HuBERT-based ordinal regression (CORAL/CORN).
+    Expects batch: (huberts, labels, ranks, lengths)
     """
-    def __init__(self, config: dict):
+    def __init__(self, config: dict) -> None:
         super().__init__()
         self.config = config
-        self.save_hyperparameters()
-
-        self.model = MultiTaskHubertModel(config)
-        self.tasks = config['model']['tasks']
-        self.loss_weights = {
-            task_name: task_cfg.get('loss_weight', 1.0)
-            for task_name, task_cfg in self.tasks.items()
+        model_cfg = config['model'].copy()
+        class_name = model_cfg.pop('class_name', 'HubertOrdinalRegressionModel')
+        model_map = {
+            'HubertOrdinalRegressionModel': HubertOrdinalRegressionModel,
+            'AttentionHubertOrdinalRegressionModel': AttentionHubertOrdinalRegressionModel,
+            'HubertCornModel': HubertCornModel,
+            'AttentionHubertCornModel': AttentionHubertCornModel,
         }
-        self.validation_step_outputs = []
+        ModelClass = model_map[class_name]
+        if class_name in ['HubertOrdinalRegressionModel', 'HubertCornModel']:
+            model_cfg.pop('embed_dim', None)
+            model_cfg.pop('n_heads', None)
+        elif class_name in ['AttentionHubertOrdinalRegressionModel', 'AttentionHubertCornModel']:
+            model_cfg.pop('proj_dim', None)
+        self.model = ModelClass(**model_cfg)
+        self.save_hyperparameters()
+        self.num_correct = 0
+        self.num_total = 0
 
-    def forward(self, hubert_feats: Tensor) -> Dict[str, Tensor]:
+    def forward(self, hubert_feats: Tensor) -> Tensor:
         return self.model(hubert_feats)
 
-    def _calculate_and_log_losses(self, step_type, logits_dict, labels_dict):
-        total_loss = torch.tensor(0.0, device=self.device)
-
-        for task_name, task_cfg in self.tasks.items():
-            if task_name not in logits_dict or task_name not in labels_dict:
-                continue
-
-            logits = logits_dict[task_name]
-            labels = labels_dict[task_name]
-            task_type = task_cfg['type']
-            task_loss = torch.tensor(0.0, device=self.device)
-
-            if task_type == 'ordinal':
-                task_loss = loss_utils.coral_loss(logits, labels)
-            elif task_type == 'multi_label':
-                task_loss = F.binary_cross_entropy_with_logits(logits, labels)
-            
-            self.log(f'{step_type}_{task_name}_loss', task_loss, sync_dist=True)
-            total_loss += self.loss_weights.get(task_name, 1.0) * task_loss
-        
-        self.log(f'{step_type}_loss', total_loss, prog_bar=True, sync_dist=True)
-        return total_loss
-
-    def training_step(self, batch, batch_idx: int):
-        huberts, labels_dict, lengths, indices = batch
-        logits_dict = self.forward(huberts)
-        loss = self._calculate_and_log_losses('train', logits_dict, labels_dict)
+    def training_step(self, batch, batch_idx: int) -> Tensor:
+        huberts, labels, ranks, lengths = batch
+        logits = self.forward(huberts)
+        if isinstance(self.model, (HubertCornModel, AttentionHubertCornModel)):
+            loss = corn_loss.corn_loss(logits, labels)
+        else:
+            loss = coral_loss.coral_loss(logits, labels)
+        self.log('train_loss', loss, prog_bar=True)
         return loss
 
-    def validation_step(self, batch, batch_idx: int):
-        huberts, labels_dict, lengths, indices = batch
-        logits_dict = self.forward(huberts)
-        self._calculate_and_log_losses('val', logits_dict, labels_dict)
+    def validation_step(self, batch, batch_idx: int) -> None:
+        huberts, labels, ranks, lengths = batch
+        logits = self.forward(huberts)
+        if isinstance(self.model, (HubertCornModel, AttentionHubertCornModel)):
+            loss = corn_loss.corn_loss(logits, labels)
+        else:
+            loss = coral_loss.coral_loss(logits, labels)
+        self.log('val_loss', loss, prog_bar=True)
+        probs = torch.sigmoid(logits)
+        preds = (probs > 0.5).sum(dim=1) + 1
+        self.num_correct += (preds == ranks).sum().item()
+        self.num_total += ranks.size(0)
 
-        # Accuracy calculation (1-indexed)
-        metrics = {}
-        for task_name, task_cfg in self.tasks.items():
-            if task_name not in logits_dict or f'{task_name}_rank' not in labels_dict:
-                continue
-            
-            if task_cfg['type'] == 'ordinal':
-                logits = logits_dict[task_name]
-                ranks = labels_dict[f'{task_name}_rank']
-                preds = logits_to_rank(logits) # Returns 1-indexed ranks
-                correct = (preds == ranks).sum().item()
-                total = ranks.size(0)
-                metrics[f'val_acc_{task_name}'] = {'correct': correct, 'total': total}
-        
-        self.validation_step_outputs.append(metrics)
-
-    def on_validation_epoch_end(self):
-        if not self.validation_step_outputs:
-            return
-            
-        agg_metrics = {}
-        for batch_metrics in self.validation_step_outputs:
-            for key, values in batch_metrics.items():
-                if key not in agg_metrics:
-                    agg_metrics[key] = {'correct': 0, 'total': 0}
-                agg_metrics[key]['correct'] += values['correct']
-                agg_metrics[key]['total'] += values['total']
-        
-        for key, values in agg_metrics.items():
-            acc = values['correct'] / values['total'] if values['total'] > 0 else 0
-            self.log(key, acc, prog_bar=True, sync_dist=True)
-            
-        self.validation_step_outputs.clear()
+    def on_validation_epoch_end(self) -> None:
+        acc = self.num_correct / self.num_total if self.num_total > 0 else 0.0
+        self.log('val_acc', acc, prog_bar=True)
+        self.num_correct = 0
+        self.num_total = 0
 
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {}).copy()
-        optimizer_type = opt_cfg.pop('type', 'AdamW').lower()
+        optimizer_type = opt_cfg.pop('type', 'Adam').lower()
 
         if 'lr' in opt_cfg: opt_cfg['lr'] = float(opt_cfg['lr'])
         if 'weight_decay' in opt_cfg: opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
+        if 'betas' in opt_cfg: opt_cfg['betas'] = tuple(float(b) for b in opt_cfg['betas'])
 
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(self.model.parameters(), **opt_cfg)
@@ -110,6 +85,9 @@ class LitHubert(pl.LightningModule):
             optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)
 
         sched_cfg = self.config.get('scheduler', {})
+        if 'factor' in sched_cfg: sched_cfg['factor'] = float(sched_cfg['factor'])
+        if 'patience' in sched_cfg: sched_cfg['patience'] = int(sched_cfg['patience'])
+            
         scheduler = {
             'scheduler': ReduceLROnPlateau(optimizer, **sched_cfg),
             'monitor': self.config.get('checkpoint', {}).get('monitor', 'val_loss')
