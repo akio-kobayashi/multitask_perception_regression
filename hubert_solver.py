@@ -147,6 +147,15 @@ class LitHubert(pl.LightningModule):
 
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {}).copy()
+
+        # --- デバッグコード開始 ---
+        import sys
+        print(f"--- DEBUG: opt_cfg before processing ---", file=sys.stderr)
+        print(opt_cfg, file=sys.stderr)
+        if 'lr' in opt_cfg:
+            print(f"--- DEBUG: type of lr is {type(opt_cfg['lr'])} ---", file=sys.stderr)
+        # --- デバッグコード終了 ---
+
         optimizer_type = opt_cfg.pop('type', 'Adam').lower()
 
         if optimizer_type == 'adamw':
