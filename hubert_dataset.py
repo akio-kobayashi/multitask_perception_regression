@@ -49,7 +49,6 @@ def data_processing(batch: List[Tuple[Tensor, int]]):
         ranks:     Tensor of shape (B,)
         lengths:   Tensor of shape (B,)
     """
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     huberts, ranks, lengths = [], [], []
 
     for hubert_feats, rank in batch:
@@ -57,8 +56,9 @@ def data_processing(batch: List[Tuple[Tensor, int]]):
         huberts.append(hubert_feats)
         ranks.append(rank)
 
-    ranks   = torch.tensor(ranks, device=device)
-    lengths = torch.tensor(lengths, device=device)
+    # Create tensors on CPU. PyTorch Lightning will move them to the correct GPU.
+    ranks   = torch.tensor(ranks)
+    lengths = torch.tensor(lengths)
     # CORAL用のラベル行列 (B, num_classes-1)
     labels  = coral_loss.ordinal_labels(ranks, num_classes=9)
 
