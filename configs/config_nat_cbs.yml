@@ -18,13 +18,13 @@ trainer:
   gradient_clip_val: 1.0
 optimizer:
   type: AdamW
-  lr: 1e-4
+  lr: 0.001
   betas: [0.9, 0.999]
-  weight_decay: 1e-6
+  weight_decay: 0.0001
 scheduler:
   mode: "min"
-  factor: 0.99
-  patience: 5
+  factor: 0.5
+  patience: 3
   verbose: true
 model:
   backbone:
