@@ -28,7 +28,7 @@ scheduler:
   verbose: true
 model:
   backbone:
-    type: 'attention'
+    type: 'ordinal'
     params:
       hubert_dim: 768
       embed_dim: 256

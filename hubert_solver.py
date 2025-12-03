@@ -5,38 +5,32 @@ import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from typing import Dict, Any
 
-import loss # coral_loss を含む loss.py を想定
-from hubert_model import MultiTaskHubertModel, logits_to_rank # 新しいモデルとヘルパー関数
+import loss as loss_utils
+from hubert_model import MultiTaskHubertModel, logits_to_rank
 
 class LitHubert(pl.LightningModule):
     """
-    HuBERT特徴量を用いたマルチタスク学習のためのPyTorch Lightningソルバー。
-    設定ファイルに基づき、複数の予測ヘッド（順序回帰、多ラベル分類）を扱う。
+    A robust, simplified multi-task solver.
+    It loops through configured tasks and applies the correct loss.
     """
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict):
         super().__init__()
         self.config = config
         self.save_hyperparameters()
 
-        self.tasks = config['model']['tasks']
         self.model = MultiTaskHubertModel(config)
-
-        # configからタスクごとの損失の重みを取得（指定がなければ1.0）
+        self.tasks = config['model']['tasks']
         self.loss_weights = {
             task_name: task_cfg.get('loss_weight', 1.0)
             for task_name, task_cfg in self.tasks.items()
         }
-        
-        # 検証ステップの出力を保持するリスト
         self.validation_step_outputs = []
 
     def forward(self, hubert_feats: Tensor) -> Dict[str, Tensor]:
         return self.model(hubert_feats)
 
-    def _calculate_loss(self, logits_dict: Dict[str, Tensor], labels_dict: Dict[str, Tensor]):
-        """複数のタスクの損失を計算し、合計する"""
-        total_loss = 0
-        loss_dict = {}
+    def _calculate_and_log_losses(self, step_type, logits_dict, labels_dict):
+        total_loss = torch.tensor(0.0, device=self.device)
 
         for task_name, task_cfg in self.tasks.items():
             if task_name not in logits_dict or task_name not in labels_dict:
@@ -45,79 +39,49 @@ class LitHubert(pl.LightningModule):
             logits = logits_dict[task_name]
             labels = labels_dict[task_name]
             task_type = task_cfg['type']
-            
+            task_loss = torch.tensor(0.0, device=self.device)
+
             if task_type == 'ordinal':
-                # CORAL損失を適用
-                task_loss = loss.coral_loss(logits, labels)
-            elif task_type == 'corn':
-                # CORN損失を適用
-                # 1Dのランク値とクラス数を渡す必要がある
-                rank_labels = labels_dict[f'{task_name}_rank']
-                num_classes = self.tasks[task_name]['params']['num_classes']
-                task_loss = loss.corn_loss(logits, rank_labels, num_classes)
+                task_loss = loss_utils.coral_loss(logits, labels)
             elif task_type == 'multi_label':
-                # バイナリクロスエントロピー損失を適用
-                task_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
-            else:
-                raise ValueError(f"未定義のタスクタイプです: {task_type}")
-
-            loss_dict[f'{task_name}_loss'] = task_loss
-            total_loss += self.loss_weights[task_name] * task_loss
-        
-        return total_loss, loss_dict
-
-    def training_step(self, batch, batch_idx: int) -> Tensor:
-        # バッチから特徴量とラベルの辞書を取得
-        huberts, labels_dict, lengths, indices = batch
-        
-        logits_dict = self.forward(huberts)
-        total_loss, loss_dict = self._calculate_loss(logits_dict, labels_dict)
-
-        # ログ記録
-        self.log('train_loss', total_loss, prog_bar=True)
-        for name, value in loss_dict.items():
-            self.log(f'train_{name}', value)
+                task_loss = F.binary_cross_entropy_with_logits(logits, labels)
             
+            self.log(f'{step_type}_{task_name}_loss', task_loss, sync_dist=True)
+            total_loss += self.loss_weights.get(task_name, 1.0) * task_loss
+        
+        self.log(f'{step_type}_loss', total_loss, prog_bar=True, sync_dist=True)
         return total_loss
 
-    def validation_step(self, batch, batch_idx: int) -> None:
+    def training_step(self, batch, batch_idx: int):
         huberts, labels_dict, lengths, indices = batch
-        
         logits_dict = self.forward(huberts)
-        total_loss, loss_dict = self._calculate_loss(logits_dict, labels_dict)
+        loss = self._calculate_and_log_losses('train', logits_dict, labels_dict)
+        return loss
 
-        self.log('val_loss', total_loss, prog_bar=True)
-        for name, value in loss_dict.items():
-            self.log(f'val_{name}', value)
+    def validation_step(self, batch, batch_idx: int):
+        huberts, labels_dict, lengths, indices = batch
+        logits_dict = self.forward(huberts)
+        self._calculate_and_log_losses('val', logits_dict, labels_dict)
 
-        # --- 各タスクの精度を計算 ---
+        # Accuracy calculation (1-indexed)
         metrics = {}
         for task_name, task_cfg in self.tasks.items():
-            if task_name not in logits_dict:
+            if task_name not in logits_dict or f'{task_name}_rank' not in labels_dict:
                 continue
             
-            logits = logits_dict[task_name]
-            
-            if task_cfg['type'] == 'ordinal' or task_cfg['type'] == 'corn':
-                # 精度計算のために、データセットから元のrankラベルを取得
+            if task_cfg['type'] == 'ordinal':
                 ranks = labels_dict[f'{task_name}_rank']
-                preds = logits_to_rank(logits)
+                preds = logits_to_rank(logits) # Returns 1-indexed ranks
                 correct = (preds == ranks).sum().item()
                 total = ranks.size(0)
-                metrics[f'val_acc_{task_name}'] = {'correct': correct, 'total': total}
-
-            elif task_cfg['type'] == 'multi_label':
-                labels = labels_dict[task_name]
-                preds = torch.sigmoid(logits) > 0.5
-                # 全てのラベルが一致した場合を正解とする
-                correct = (preds == labels).all(dim=1).sum().item()
-                total = labels.size(0)
                 metrics[f'val_acc_{task_name}'] = {'correct': correct, 'total': total}
         
         self.validation_step_outputs.append(metrics)
 
-    def on_validation_epoch_end(self) -> None:
-        # validationステップ全体での精度を集計
+    def on_validation_epoch_end(self):
+        if not self.validation_step_outputs:
+            return
+            
         agg_metrics = {}
         for batch_metrics in self.validation_step_outputs:
             for key, values in batch_metrics.items():
@@ -126,49 +90,27 @@ class LitHubert(pl.LightningModule):
                 agg_metrics[key]['correct'] += values['correct']
                 agg_metrics[key]['total'] += values['total']
         
-        # 集計した精度をログに記録
         for key, values in agg_metrics.items():
             acc = values['correct'] / values['total'] if values['total'] > 0 else 0
-            self.log(key, acc, prog_bar=True)
+            self.log(key, acc, prog_bar=True, sync_dist=True)
             
-        self.validation_step_outputs.clear() # メモリを解放
-
-    def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Dict[str, Tensor]:
-        huberts, labels_dict, lengths, indices = batch
-        logits_dict = self.forward(huberts)
-        
-        predictions = {}
-        for task_name, task_cfg in self.tasks.items():
-            logits = logits_dict[task_name]
-            if task_cfg['type'] == 'ordinal':
-                predictions[task_name] = logits_to_rank(logits)
-            elif task_cfg['type'] == 'corn': # Added CORN prediction
-                predictions[task_name] = logits_to_rank(logits) # CORN prediction is same as CORAL
-            elif task_cfg['type'] == 'multi_label':
-                predictions[task_name] = (torch.sigmoid(logits) > 0.5).int() # Convert bool to int (0 or 1)
-        return predictions
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {}).copy()
-        optimizer_type = opt_cfg.pop('type', 'Adam').lower()
+        optimizer_type = opt_cfg.pop('type', 'AdamW').lower()
 
-        # --- 修正：数値を明示的にfloat型に変換 ---
-        if 'lr' in opt_cfg:
-            opt_cfg['lr'] = float(opt_cfg['lr'])
-        if 'weight_decay' in opt_cfg:
-            opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
-        # --- 修正終了 ---
+        if 'lr' in opt_cfg: opt_cfg['lr'] = float(opt_cfg['lr'])
+        if 'weight_decay' in opt_cfg: opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
 
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(self.model.parameters(), **opt_cfg)
-        elif optimizer_type == 'adam':
+        else: # Default to Adam
             optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)
-        else:
-            raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
 
         sched_cfg = self.config.get('scheduler', {})
         scheduler = {
             'scheduler': ReduceLROnPlateau(optimizer, **sched_cfg),
-            'monitor': 'val_loss'
+            'monitor': self.config.get('checkpoint', {}).get('monitor', 'val_loss')
         }
         return [optimizer], [scheduler]

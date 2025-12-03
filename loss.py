@@ -114,28 +114,6 @@ def corn_loss(logits, y_train, num_classes):
     ----------
         loss : torch.tensor
         A torch.tensor containing a single loss value.
-
-    Examples
-    ----------
-    >>> import torch
-    >>> from coral_pytorch.losses import corn_loss
-    >>> # Consider 8 training examples
-    >>> _  = torch.manual_seed(123)
-    >>> X_train = torch.rand(8, 99)
-    >>> y_train = torch.tensor([0, 1, 2, 2, 2, 3, 4, 4])
-    >>> NUM_CLASSES = 5
-    >>> #
-    >>> #
-    >>> # def __init__(self):
-    >>> corn_net = torch.nn.Linear(99, NUM_CLASSES-1)
-    >>> #
-    >>> #
-    >>> # def forward(self, X_train):
-    >>> logits = corn_net(X_train)
-    >>> logits.shape
-    torch.Size([8, 4])
-    >>> corn_loss(logits, y_train, NUM_CLASSES)
-    tensor(0.7127, grad_fn=<DivBackward0>)
     """
     sets = []
     for i in range(num_classes-1):
@@ -159,12 +137,10 @@ def corn_loss(logits, y_train, num_classes):
                           + (F.logsigmoid(pred) - pred)*(1-train_labels))
         losses += loss
 
-    # Handle division by zero case
     if num_examples == 0:
-        # Return a zero loss tensor if no valid examples in batch
         return torch.tensor(0.0, device=logits.device, requires_grad=True)
-    else:
-        return losses / num_examples
+    
+    return losses/num_examples
 
 
 class CoralLoss(torch.nn.Module):
