@@ -49,9 +49,12 @@ class LitHubert(pl.LightningModule):
             if task_type == 'ordinal':
                 # CORAL損失を適用
                 task_loss = loss.coral_loss(logits, labels)
-            elif task_type == 'corn': # Added CORN loss
+            elif task_type == 'corn':
                 # CORN損失を適用
-                task_loss = loss.corn_loss(logits, labels)
+                # 1Dのランク値とクラス数を渡す必要がある
+                rank_labels = labels_dict[f'{task_name}_rank']
+                num_classes = self.tasks[task_name]['params']['num_classes']
+                task_loss = loss.corn_loss(logits, rank_labels, num_classes)
             elif task_type == 'multi_label':
                 # バイナリクロスエントロピー損失を適用
                 task_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
