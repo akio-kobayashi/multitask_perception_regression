@@ -27,10 +27,10 @@ class HubertDataset(torch.utils.data.Dataset):
 
     @staticmethod
     def score_to_rank(score: float) -> int:
-        """1.0-5.0 (0.5刻み) のスコアを 0-8 のランクに変換する"""
+        """1.0-5.0 (0.5刻み) のスコアを 1-9 のランクに変換する"""
         if pd.isna(score):
-            return 0  # 不正な値はランク0とする (0-indexedでは最小ランク)
-        return int(round((score - 1.0) / 0.5))
+            return 0  # 不正な値はランク0とする
+        return int(round((score - 1.0) / 0.5)) + 1
 
     def __len__(self) -> int:
         return len(self.df)
