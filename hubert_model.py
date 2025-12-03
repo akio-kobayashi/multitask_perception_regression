@@ -5,9 +5,9 @@ from typing import Dict, Any
 
 # --- Utility Function ---
 def logits_to_rank(logits: torch.Tensor) -> torch.Tensor:
-    """Converts CORAL-style logits to a rank/label."""
+    """Converts CORAL-style logits to a 0-indexed rank/label."""
     probs = torch.sigmoid(logits)
-    return (probs > 0.5).sum(dim=1) + 1
+    return (probs > 0.5).sum(dim=1)
 
 # --- 1. Backbone Modules (Feature Extractors) ---
 class HubertBackbone(nn.Module):
