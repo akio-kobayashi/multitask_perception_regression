@@ -5,9 +5,9 @@ process:
   num_workers: 4
 checkpoint:
   dirpath: "checkpoints"
-  filename: "{epoch}-{val_loss:.2f}"
-  monitor: "val_loss"
-  mode: "min"
+  filename: "{epoch}-{val_acc_naturalness:.3f}"
+  monitor: "val_acc_naturalness"
+  mode: "max"
   save_top_k: 1
 logger:
   save_dir: "logs"
@@ -17,22 +17,26 @@ trainer:
   max_epochs: 50
   gradient_clip_val: 1.0
 optimizer:
-  lr: 0.001
-  weight_decay: 0.0001
+  type: AdamW
+  lr: 1e-4
+  betas: [0.9, 0.999]
+  weight_decay: 1e-6
 scheduler:
   mode: "min"
-  factor: 0.5
-  patience: 3
+  factor: 0.99
+  patience: 5
+  verbose: true
 model:
   backbone:
-    type: 'simple'
+    type: 'attention'
     params:
       hubert_dim: 768
-      proj_dim: 256
+      embed_dim: 256
+      n_heads: 4
       dropout_rate: 0.3
   tasks:
     naturalness:
-      type: 'ordinal'
+      type: 'corn'
       params:
         num_classes: 9
     cbs:

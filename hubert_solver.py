@@ -49,6 +49,9 @@ class LitHubert(pl.LightningModule):
             if task_type == 'ordinal':
                 # CORAL損失を適用
                 task_loss = loss.coral_loss(logits, labels)
+            elif task_type == 'corn': # Added CORN loss
+                # CORN損失を適用
+                task_loss = loss.corn_loss(logits, labels)
             elif task_type == 'multi_label':
                 # バイナリクロスエントロピー損失を適用
                 task_loss = F.binary_cross_entropy_with_logits(logits, labels.float())
@@ -92,7 +95,7 @@ class LitHubert(pl.LightningModule):
             
             logits = logits_dict[task_name]
             
-            if task_cfg['type'] == 'ordinal':
+            if task_cfg['type'] == 'ordinal' or task_cfg['type'] == 'corn':
                 # 精度計算のために、データセットから元のrankラベルを取得
                 ranks = labels_dict[f'{task_name}_rank']
                 preds = logits_to_rank(logits)
@@ -136,13 +139,22 @@ class LitHubert(pl.LightningModule):
             logits = logits_dict[task_name]
             if task_cfg['type'] == 'ordinal':
                 predictions[task_name] = logits_to_rank(logits)
+            elif task_cfg['type'] == 'corn': # Added CORN prediction
+                predictions[task_name] = logits_to_rank(logits) # CORN prediction is same as CORAL
             elif task_cfg['type'] == 'multi_label':
                 predictions[task_name] = (torch.sigmoid(logits) > 0.5).int() # Convert bool to int (0 or 1)
         return predictions
 
     def configure_optimizers(self):
-        opt_cfg = self.config.get('optimizer', {})
-        optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)
+        opt_cfg = self.config.get('optimizer', {}).copy()
+        optimizer_type = opt_cfg.pop('type', 'Adam').lower()
+
+        if optimizer_type == 'adamw':
+            optimizer = torch.optim.AdamW(self.model.parameters(), **opt_cfg)
+        elif optimizer_type == 'adam':
+            optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)
+        else:
+            raise ValueError(f"Unsupported optimizer type: {optimizer_type}")
 
         sched_cfg = self.config.get('scheduler', {})
         scheduler = {

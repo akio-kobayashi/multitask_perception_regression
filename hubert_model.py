@@ -47,6 +47,7 @@ class OrdinalRegressionHead(nn.Module):
     """CORAL-style ordinal regression head."""
     def __init__(self, input_dim: int, num_classes: int = 9, dropout_rate: float = 0.3):
         super().__init__()
+        self.num_classes = num_classes
         self.classifier = nn.Sequential(
             nn.Linear(input_dim, input_dim // 2),
             nn.ReLU(),
@@ -56,6 +57,26 @@ class OrdinalRegressionHead(nn.Module):
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         return self.classifier(features)
+
+class CornHead(nn.Module):
+    """CORN-style ordinal regression head."""
+    def __init__(self, input_dim: int, num_classes: int = 9, dropout_rate: float = 0.3):
+        super().__init__()
+        self.num_classes = num_classes
+        # 各閾値の二値分類器
+        self.classifiers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(input_dim, input_dim // 2),
+                nn.ReLU(),
+                nn.Dropout(dropout_rate),
+                nn.Linear(input_dim // 2, 1)
+            )
+            for _ in range(num_classes - 1)
+        ])
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        logits = [clf(features).squeeze(1) for clf in self.classifiers]
+        return torch.stack(logits, dim=1)
 
 class MultiLabelClassificationHead(nn.Module):
     """Multi-label classification head for CB factors."""
@@ -99,6 +120,8 @@ class MultiTaskHubertModel(nn.Module):
             
             if head_type == 'ordinal':
                 self.heads[task_name] = OrdinalRegressionHead(input_dim=self.backbone.output_dim, **head_params)
+            elif head_type == 'corn': # Added CornHead
+                self.heads[task_name] = CornHead(input_dim=self.backbone.output_dim, **head_params)
             elif head_type == 'multi_label':
                 self.heads[task_name] = MultiLabelClassificationHead(input_dim=self.backbone.output_dim, **head_params)
             else:
