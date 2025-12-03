@@ -1,80 +1,140 @@
-import os
 import torch
 from torch import Tensor
+import torch.nn.functional as F
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ReduceLROnPlateau
+from typing import Dict
+
 import coral_loss
-import corn_loss
+import corn_loss # Keep import for model compatibility
 from hubert_model import (
     HubertOrdinalRegressionModel,
     AttentionHubertOrdinalRegressionModel,
     HubertCornModel,
-    AttentionHubertCornModel
+    AttentionHubertCornModel,
+    MultiTaskAttentionHubertModel
 )
 
 class LitHubert(pl.LightningModule):
     """
-    PyTorch Lightning solver for HuBERT-based ordinal regression (CORAL/CORN).
-    Expects batch: (huberts, labels, ranks, lengths)
+    A solver minimally extended for multi-task learning, based on the original simple design.
     """
     def __init__(self, config: dict) -> None:
         super().__init__()
         self.config = config
+        self.save_hyperparameters()
+
+        # --- Model Selection ---
         model_cfg = config['model'].copy()
-        class_name = model_cfg.pop('class_name', 'HubertOrdinalRegressionModel')
+        class_name = model_cfg.pop('class_name')
+        
+        # Map class names to the actual classes
         model_map = {
             'HubertOrdinalRegressionModel': HubertOrdinalRegressionModel,
             'AttentionHubertOrdinalRegressionModel': AttentionHubertOrdinalRegressionModel,
             'HubertCornModel': HubertCornModel,
             'AttentionHubertCornModel': AttentionHubertCornModel,
+            'MultiTaskAttentionHubertModel': MultiTaskAttentionHubertModel,
         }
         ModelClass = model_map[class_name]
-        if class_name in ['HubertOrdinalRegressionModel', 'HubertCornModel']:
-            model_cfg.pop('embed_dim', None)
-            model_cfg.pop('n_heads', None)
-        elif class_name in ['AttentionHubertOrdinalRegressionModel', 'AttentionHubertCornModel']:
-            model_cfg.pop('proj_dim', None)
-        self.model = ModelClass(**model_cfg)
-        self.save_hyperparameters()
-        self.num_correct = 0
-        self.num_total = 0
 
-    def forward(self, hubert_feats: Tensor) -> Tensor:
+        # Pass only relevant params to the model constructor
+        # This logic is adapted from the original solver for robustness
+        if 'MultiTask' not in class_name:
+             if 'Attention' in class_name:
+                 model_cfg.pop('proj_dim', None)
+             else:
+                 model_cfg.pop('embed_dim', None)
+                 model_cfg.pop('n_heads', None)
+        
+        self.model = ModelClass(**model_cfg)
+        
+        # --- Multi-task setup ---
+        self.tasks = model_cfg.get('tasks', {})
+        self.loss_weights = {
+            task_name: task_cfg.get('loss_weight', 1.0)
+            for task_name, task_cfg in self.tasks.items()
+        }
+        self.validation_step_outputs = []
+
+    def forward(self, hubert_feats: Tensor) -> Dict[str, Tensor]:
         return self.model(hubert_feats)
 
-    def training_step(self, batch, batch_idx: int) -> Tensor:
-        huberts, labels, ranks, lengths = batch
-        logits = self.forward(huberts)
-        if isinstance(self.model, (HubertCornModel, AttentionHubertCornModel)):
-            loss = corn_loss.corn_loss(logits, labels)
-        else:
-            loss = coral_loss.coral_loss(logits, labels)
-        self.log('train_loss', loss, prog_bar=True)
+    def _calculate_and_log_losses(self, step_type: str, logits_dict: Dict, labels_dict: Dict) -> Tensor:
+        total_loss = torch.tensor(0.0, device=self.device)
+
+        for task_name, task_cfg in self.tasks.items():
+            if task_name not in logits_dict or task_name not in labels_dict:
+                continue
+
+            logits = logits_dict[task_name]
+            labels = labels_dict[task_name]
+            loss_type = task_cfg.get('loss', 'coral') # Default to coral
+            task_loss = torch.tensor(0.0, device=self.device)
+
+            if loss_type == 'coral':
+                task_loss = coral_loss.coral_loss(logits, labels)
+            elif loss_type == 'bce':
+                task_loss = F.binary_cross_entropy_with_logits(logits, labels)
+            
+            self.log(f'{step_type}_{task_name}_loss', task_loss, sync_dist=True)
+            total_loss += self.loss_weights.get(task_name, 1.0) * task_loss
+        
+        self.log(f'{step_type}_loss', total_loss, prog_bar=True, sync_dist=True)
+        return total_loss
+
+    def training_step(self, batch: tuple, batch_idx: int) -> Tensor:
+        huberts, labels_dict, lengths, indices = batch
+        logits_dict = self.forward(huberts)
+        loss = self._calculate_and_log_losses('train', logits_dict, labels_dict)
         return loss
 
-    def validation_step(self, batch, batch_idx: int) -> None:
-        huberts, labels, ranks, lengths = batch
-        logits = self.forward(huberts)
-        if isinstance(self.model, (HubertCornModel, AttentionHubertCornModel)):
-            loss = corn_loss.corn_loss(logits, labels)
-        else:
-            loss = coral_loss.coral_loss(logits, labels)
-        self.log('val_loss', loss, prog_bar=True)
-        probs = torch.sigmoid(logits)
-        preds = (probs > 0.5).sum(dim=1) + 1
-        self.num_correct += (preds == ranks).sum().item()
-        self.num_total += ranks.size(0)
+    def validation_step(self, batch: tuple, batch_idx: int) -> None:
+        huberts, labels_dict, lengths, indices = batch
+        logits_dict = self.forward(huberts)
+        self._calculate_and_log_losses('val', logits_dict, labels_dict)
+
+        # Accuracy calculation (1-indexed)
+        metrics = {}
+        for task_name, task_cfg in self.tasks.items():
+            if task_name not in logits_dict or f'{task_name}_rank' not in labels_dict:
+                continue
+            
+            loss_type = task_cfg.get('loss', 'coral')
+            if loss_type == 'coral':
+                ranks = labels_dict[f'{task_name}_rank']
+                # The logits_to_label function is now in coral_loss.py
+                preds = coral_loss.logits_to_label(logits_dict[task_name])
+                correct = (preds == ranks).sum().item()
+                total = ranks.size(0)
+                metrics[f'val_acc_{task_name}'] = {'correct': correct, 'total': total}
+        
+        self.validation_step_outputs.append(metrics)
 
     def on_validation_epoch_end(self) -> None:
-        acc = self.num_correct / self.num_total if self.num_total > 0 else 0.0
-        self.log('val_acc', acc, prog_bar=True)
-        self.num_correct = 0
-        self.num_total = 0
+        if not self.validation_step_outputs: return
+        
+        # Aggregate metrics from all validation steps
+        agg_metrics = {}
+        for batch_metrics in self.validation_step_outputs:
+            for key, values in batch_metrics.items():
+                if key not in agg_metrics:
+                    agg_metrics[key] = {'correct': 0, 'total': 0}
+                agg_metrics[key]['correct'] += values['correct']
+                agg_metrics[key]['total'] += values['total']
+        
+        # Log aggregated accuracies
+        for key, values in agg_metrics.items():
+            acc = values['correct'] / values['total'] if values['total'] > 0 else 0
+            self.log(key, acc, prog_bar=True, sync_dist=True)
+            
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {}).copy()
         optimizer_type = opt_cfg.pop('type', 'Adam').lower()
 
+        # Ensure numeric params are correct type
         if 'lr' in opt_cfg: opt_cfg['lr'] = float(opt_cfg['lr'])
         if 'weight_decay' in opt_cfg: opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
         if 'betas' in opt_cfg: opt_cfg['betas'] = tuple(float(b) for b in opt_cfg['betas'])

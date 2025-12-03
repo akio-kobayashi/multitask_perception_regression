@@ -1,43 +1,46 @@
-train_path: "hubert_with_listeners.csv"
-valid_path: "hubert_with_listeners.csv" # Assuming same for now, user can split later
+# Train intelligibility only
+train_path: "path/to/train.csv"
+valid_path: "path/to/valid.csv"
+output_csv: "predictions.csv"
+
 batch_size: 32
-process:
-  num_workers: 4
-checkpoint:
-  dirpath: "checkpoints"
-  filename: "{epoch}-{val_acc_intelligibility:.3f}"
-  monitor: "val_acc_intelligibility"
-  mode: "max"
-  save_top_k: 1
-logger:
-  save_dir: "logs"
-  name: "multi_task_hubert"
-  version: 0 # Will be incremented by Lightning if directory exists
-trainer:
-  max_epochs: 50
-  gradient_clip_val: 1.0
-optimizer:
-  type: AdamW
-  lr: 0.001
-  betas: [0.9, 0.999]
-  weight_decay: 0.0001
-scheduler:
-  mode: "min"
-  factor: 0.5
-  patience: 3
-  verbose: true
+process: {num_workers: 0}
+trainer: {max_epochs: 50}
+
 model:
   backbone:
     type: 'attention'
     params:
-      hubert_dim: 768
       embed_dim: 256
       n_heads: 4
       dropout_rate: 0.3
   tasks:
     intelligibility:
-      type: 'ordinal'
+      loss: coral
+      loss_weight: 1.0
       params:
         num_classes: 9
-evaluation:
-  predictions_path: "predictions_intel_only.csv"
+
+optimizer:
+  type: AdamW
+  lr: 0.001
+  betas: [0.9, 0.999]
+  weight_decay: 0.0001
+
+scheduler:
+  mode: "max"
+  factor: 0.5
+  patience: 3
+  verbose: true
+
+checkpoint:
+  dirpath: "checkpoints/intel_only"
+  filename: "{epoch}-{val_acc_intelligibility:.3f}"
+  monitor: "val_acc_intelligibility"
+  mode: "max"
+  save_top_k: 1
+
+logger:
+  save_dir: "logs"
+  name: "intel_only"
+  version: 0

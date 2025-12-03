@@ -1,6 +1,17 @@
 import torch.nn.functional as F
 import torch
 
+def logits_to_label(logits: torch.Tensor) -> torch.Tensor:
+    """
+    CORAL の出力（logits）をラベルに変換．
+    logits: Tensor of shape (batch_size, num_classes - 1) のシグモイド前の値
+    Returns:
+        Tensor of shape (batch_size,) with values in [1, num_classes]
+    """
+    probs = torch.sigmoid(logits)
+    return (probs > 0.5).sum(dim=1) + 1
+
+
 def ordinal_labels(labels, num_classes):
     """
     順序回帰のラベルを (batch, num_classes - 1) の形式に変換
