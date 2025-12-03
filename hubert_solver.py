@@ -147,16 +147,14 @@ class LitHubert(pl.LightningModule):
 
     def configure_optimizers(self):
         opt_cfg = self.config.get('optimizer', {}).copy()
-
-        # --- デバッグコード開始 ---
-        import sys
-        print(f"--- DEBUG: opt_cfg before processing ---", file=sys.stderr)
-        print(opt_cfg, file=sys.stderr)
-        if 'lr' in opt_cfg:
-            print(f"--- DEBUG: type of lr is {type(opt_cfg['lr'])} ---", file=sys.stderr)
-        # --- デバッグコード終了 ---
-
         optimizer_type = opt_cfg.pop('type', 'Adam').lower()
+
+        # --- 修正：数値を明示的にfloat型に変換 ---
+        if 'lr' in opt_cfg:
+            opt_cfg['lr'] = float(opt_cfg['lr'])
+        if 'weight_decay' in opt_cfg:
+            opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
+        # --- 修正終了 ---
 
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(self.model.parameters(), **opt_cfg)
