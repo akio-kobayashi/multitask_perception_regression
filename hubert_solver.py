@@ -77,11 +77,6 @@ class LitHubert(pl.LightningModule):
         self.log('train_loss', total_loss, prog_bar=True)
         for name, value in loss_dict.items():
             self.log(f'train_{name}', value)
-
-        # --- DEBUGGING START ---
-        import sys
-        print(f"--- DEBUG [training_step]: returning total_loss {total_loss} with type {type(total_loss)} ---", file=sys.stderr)
-        # --- DEBUGGING END ---
             
         return total_loss
 

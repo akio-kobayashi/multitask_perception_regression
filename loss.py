@@ -159,20 +159,12 @@ def corn_loss(logits, y_train, num_classes):
                           + (F.logsigmoid(pred) - pred)*(1-train_labels))
         losses += loss
 
-    # --- DEBUGGING START ---
-    import sys
     # Handle division by zero case
     if num_examples == 0:
         # Return a zero loss tensor if no valid examples in batch
-        # This is a bug fix for the original code
-        return_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
+        return torch.tensor(0.0, device=logits.device, requires_grad=True)
     else:
-        return_val = losses / num_examples
-    
-    print(f"--- DEBUG [corn_loss]: returning value {return_val} with type {type(return_val)} ---", file=sys.stderr)
-    # --- DEBUGGING END ---
-    
-    return return_val
+        return losses / num_examples
 
 class CoralLoss(torch.nn.Module):
     """Computes the CORAL loss described in

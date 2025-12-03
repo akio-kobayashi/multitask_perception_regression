@@ -117,6 +117,11 @@ def data_processing(batch: List[Tuple[Tensor, Dict[str, Any], int]], tasks_confi
                 ranks = torch.tensor(labels, dtype=torch.long)
                 # coral_loss用のラベル形式に変換
                 batched_labels[task_name] = loss.ordinal_labels(ranks, num_classes)
+            elif task_type == 'corn':
+                # corn_lossは'_rank'キーのランク値を直接使うが、solverのループを
+                # 通過するためにキー自体は存在している必要がある。
+                # そのため、値にはランク値をそのまま入れておく。
+                batched_labels[task_name] = torch.tensor(labels, dtype=torch.long)
             elif task_type == 'multi_label':
                 batched_labels[task_name] = torch.stack(labels)
 
