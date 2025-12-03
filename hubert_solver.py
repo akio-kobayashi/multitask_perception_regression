@@ -70,6 +70,7 @@ class LitHubert(pl.LightningModule):
                 continue
             
             if task_cfg['type'] == 'ordinal':
+                logits = logits_dict[task_name]
                 ranks = labels_dict[f'{task_name}_rank']
                 preds = logits_to_rank(logits) # Returns 1-indexed ranks
                 correct = (preds == ranks).sum().item()
