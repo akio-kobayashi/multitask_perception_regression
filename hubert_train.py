@@ -22,9 +22,8 @@ from string import Template
 from typing import Dict, Any
 
 def load_config(path: str) -> dict:
-    raw = open(path, 'r', encoding='utf-8').read()
-    rendered = Template(raw).substitute(**os.environ)
-    cfg = yaml.safe_load(rendered)
+    with open(path, 'r', encoding='utf-8') as f:
+        cfg = yaml.safe_load(f)
     return cfg.get('config', cfg)
 
 
