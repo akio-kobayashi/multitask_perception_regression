@@ -145,11 +145,20 @@ def corn_loss(logits, y_train, num_classes):
 
     num_examples = 0
     losses = 0.
+    
+    # --- DEBUGGING START ---
+    import sys
+    print(f"\n--- NEW BATCH IN corn_loss ---", file=sys.stderr)
+    # --- DEBUGGING END ---
+
     for task_index, s in enumerate(sets):
         train_examples = s[0]
         train_labels = s[1]
 
         if len(train_labels) < 1:
+            # --- DEBUGGING START ---
+            print(f"  [Task {task_index}] No examples, skipping.", file=sys.stderr)
+            # --- DEBUGGING END ---
             continue
 
         num_examples += len(train_labels)
@@ -158,13 +167,23 @@ def corn_loss(logits, y_train, num_classes):
         loss = -torch.sum(F.logsigmoid(pred)*train_labels
                           + (F.logsigmoid(pred) - pred)*(1-train_labels))
         losses += loss
+        
+        # --- DEBUGGING START ---
+        print(f"  [Task {task_index}] Num examples: {len(train_labels):>3d} | Loss: {loss.item():.4f} | Cumulative Losses: {losses.item():.4f}", file=sys.stderr)
+        # --- DEBUGGING END ---
 
     # Handle division by zero case
     if num_examples == 0:
-        # Return a zero loss tensor if no valid examples in batch
-        return torch.tensor(0.0, device=logits.device, requires_grad=True)
+        return_val = torch.tensor(0.0, device=logits.device, requires_grad=True)
     else:
-        return losses / num_examples
+        return_val = losses / num_examples
+        
+    # --- DEBUGGING START ---
+    print(f"--- FINAL [corn_loss]: returning value {return_val.item():.4f} ---\n", file=sys.stderr)
+    # --- DEBUGGING END ---
+    
+    return return_val
+
 
 class CoralLoss(torch.nn.Module):
     """Computes the CORAL loss described in

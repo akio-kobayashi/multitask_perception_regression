@@ -36,11 +36,11 @@ model:
       dropout_rate: 0.3
   tasks:
     intelligibility:
-      type: 'ordinal'
+      type: 'corn'
       params:
         num_classes: 9
     naturalness:
-      type: 'ordinal'
+      type: 'corn'
       params:
         num_classes: 9
 evaluation:
