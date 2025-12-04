@@ -22,17 +22,17 @@ class HubertDataset(data.Dataset):
     def score_to_rank(score: float) -> int:
         """Converts 1.0-5.0 score to 1-9 rank."""
         if pd.isna(score):
-            return 0  # Return 0 for invalid ranks, can be filtered later.
+            return 0  # Use 0 for invalid ranks.
         return int(round((score - 1.0) / 0.5)) + 1
 
     def __len__(self) -> int:
         return len(self.df)
 
-    def __getitem__(self, idx: int) -> Tuple[Tensor, dict]:
+    def __getitem__(self, idx: int) -> Tuple[Tensor, Dict[str, Any], int]:
         row = self.df.iloc[idx]
         
         # Load Hubert features, handling different keys
-        path_column = 'hubert' if 'hubert' in row else 'feature'
+        path_column = 'hubert' if 'hubert' in row.index else 'feature'
         hubert_data = torch.load(row[path_column], map_location='cpu')
         if isinstance(hubert_data, dict):
             hubert_feats = hubert_data.get('hubert', hubert_data.get('hubert_feats'))
@@ -51,21 +51,24 @@ class HubertDataset(data.Dataset):
             # Ensure CB labels are float tensors for BCE loss
             labels['cbs'] = torch.tensor(row[self.cb_columns].values.astype(float), dtype=torch.float32)
         
-        return hubert_feats, labels
+        return hubert_feats, labels, idx
 
-def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Dict[str, Any]):
+def data_processing(batch: List[Tuple[Tensor, Dict[str, Any], int]], tasks_config: Dict[str, Any]):
     """
     Collates a batch of multi-task data into padded tensors.
+    This version correctly returns 4 items.
     """
-    huberts, all_labels, lengths = [], [], []
+    huberts, all_labels, lengths, indices = [], [], [], []
 
-    for hubert_feats, labels_dict in batch:
+    for hubert_feats, labels_dict, idx in batch:
         lengths.append(hubert_feats.shape[0])
         huberts.append(hubert_feats)
         all_labels.append(labels_dict)
+        indices.append(idx)
 
     huberts_tensor = nn.utils.rnn.pad_sequence(huberts, batch_first=True)
     lengths_tensor = torch.tensor(lengths, dtype=torch.long)
+    indices_tensor = torch.tensor(indices, dtype=torch.long)
 
     # Batch the labels for each task into a dictionary of tensors
     batched_labels = {}
@@ -75,7 +78,7 @@ def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Di
         if not current_task_labels:
             continue
 
-        task_type = task_cfg.get('loss', 'coral') # Default to coral if not specified
+        task_type = task_cfg.get('loss', 'coral')
 
         if task_type == 'coral':
             ranks = torch.tensor(current_task_labels, dtype=torch.long)
@@ -86,4 +89,4 @@ def data_processing(batch: List[Tuple[Tensor, Dict[str, Any]]], tasks_config: Di
         elif task_type == 'bce': # For multi-label tasks like cbs
             batched_labels[task_name] = torch.stack(current_task_labels)
 
-    return huberts_tensor, batched_labels, lengths_tensor
+    return huberts_tensor, batched_labels, lengths_tensor, indices_tensor
