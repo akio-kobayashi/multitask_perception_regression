@@ -3,54 +3,31 @@ from torch import Tensor
 import torch.nn.functional as F
 import pytorch_lightning as pl
 from torch.optim.lr_scheduler import ReduceLROnPlateau
-from typing import Dict
+from typing import Dict, Any
 
+# The flexible model and a helper function for accuracy calculation
+from hubert_model import MultiTaskHubertModel
+from coral_loss import logits_to_label 
+
+# The loss functions
 import coral_loss
-import corn_loss # Keep import for model compatibility
-from hubert_model import (
-    HubertOrdinalRegressionModel,
-    AttentionHubertOrdinalRegressionModel,
-    HubertCornModel,
-    AttentionHubertCornModel,
-    MultiTaskAttentionHubertModel
-)
+import corn_loss
 
 class LitHubert(pl.LightningModule):
     """
-    A solver minimally extended for multi-task learning, based on the original simple design.
+    The definitive, robust, multi-task solver designed to work with
+    the flexible MultiTaskHubertModel.
     """
-    def __init__(self, config: dict) -> None:
+    def __init__(self, config: dict):
         super().__init__()
         self.config = config
         self.save_hyperparameters()
 
-        # --- Model Selection ---
-        model_cfg = config['model'].copy()
-        class_name = model_cfg.pop('class_name')
+        # The model internally configures its backbone and heads from the config
+        self.model = MultiTaskHubertModel(config)
         
-        # Map class names to the actual classes
-        model_map = {
-            'HubertOrdinalRegressionModel': HubertOrdinalRegressionModel,
-            'AttentionHubertOrdinalRegressionModel': AttentionHubertOrdinalRegressionModel,
-            'HubertCornModel': HubertCornModel,
-            'AttentionHubertCornModel': AttentionHubertCornModel,
-            'MultiTaskAttentionHubertModel': MultiTaskAttentionHubertModel,
-        }
-        ModelClass = model_map[class_name]
-
-        # Pass only relevant params to the model constructor
-        # This logic is adapted from the original solver for robustness
-        if 'MultiTask' not in class_name:
-             if 'Attention' in class_name:
-                 model_cfg.pop('proj_dim', None)
-             else:
-                 model_cfg.pop('embed_dim', None)
-                 model_cfg.pop('n_heads', None)
-        
-        self.model = ModelClass(**model_cfg)
-        
-        # --- Multi-task setup ---
-        self.tasks = model_cfg.get('tasks', {})
+        # Get task definitions for the solver's loops
+        self.tasks = config['model']['tasks']
         self.loss_weights = {
             task_name: task_cfg.get('loss_weight', 1.0)
             for task_name, task_cfg in self.tasks.items()
@@ -69,13 +46,17 @@ class LitHubert(pl.LightningModule):
 
             logits = logits_dict[task_name]
             labels = labels_dict[task_name]
-            loss_type = task_cfg.get('loss', 'coral') # Default to coral
+            loss_type = task_cfg.get('loss')
             task_loss = torch.tensor(0.0, device=self.device)
 
             if loss_type == 'coral':
                 task_loss = coral_loss.coral_loss(logits, labels)
             elif loss_type == 'bce':
                 task_loss = F.binary_cross_entropy_with_logits(logits, labels)
+            else:
+                # For now, we only support coral and bce.
+                # We can add corn back later if needed.
+                continue
             
             self.log(f'{step_type}_{task_name}_loss', task_loss, sync_dist=True)
             total_loss += self.loss_weights.get(task_name, 1.0) * task_loss
@@ -94,17 +75,15 @@ class LitHubert(pl.LightningModule):
         logits_dict = self.forward(huberts)
         self._calculate_and_log_losses('val', logits_dict, labels_dict)
 
-        # Accuracy calculation (1-indexed)
+        # Accuracy calculation (using 1-indexed labels)
         metrics = {}
         for task_name, task_cfg in self.tasks.items():
             if task_name not in logits_dict or f'{task_name}_rank' not in labels_dict:
                 continue
             
-            loss_type = task_cfg.get('loss', 'coral')
-            if loss_type == 'coral':
+            if task_cfg.get('loss') == 'coral':
                 ranks = labels_dict[f'{task_name}_rank']
-                # The logits_to_label function is now in coral_loss.py
-                preds = coral_loss.logits_to_label(logits_dict[task_name])
+                preds = logits_to_label(logits_dict[task_name]) # 1-indexed
                 correct = (preds == ranks).sum().item()
                 total = ranks.size(0)
                 metrics[f'val_acc_{task_name}'] = {'correct': correct, 'total': total}
@@ -114,7 +93,6 @@ class LitHubert(pl.LightningModule):
     def on_validation_epoch_end(self) -> None:
         if not self.validation_step_outputs: return
         
-        # Aggregate metrics from all validation steps
         agg_metrics = {}
         for batch_metrics in self.validation_step_outputs:
             for key, values in batch_metrics.items():
@@ -123,7 +101,6 @@ class LitHubert(pl.LightningModule):
                 agg_metrics[key]['correct'] += values['correct']
                 agg_metrics[key]['total'] += values['total']
         
-        # Log aggregated accuracies
         for key, values in agg_metrics.items():
             acc = values['correct'] / values['total'] if values['total'] > 0 else 0
             self.log(key, acc, prog_bar=True, sync_dist=True)
@@ -134,14 +111,13 @@ class LitHubert(pl.LightningModule):
         opt_cfg = self.config.get('optimizer', {}).copy()
         optimizer_type = opt_cfg.pop('type', 'Adam').lower()
 
-        # Ensure numeric params are correct type
         if 'lr' in opt_cfg: opt_cfg['lr'] = float(opt_cfg['lr'])
         if 'weight_decay' in opt_cfg: opt_cfg['weight_decay'] = float(opt_cfg['weight_decay'])
         if 'betas' in opt_cfg: opt_cfg['betas'] = tuple(float(b) for b in opt_cfg['betas'])
 
         if optimizer_type == 'adamw':
             optimizer = torch.optim.AdamW(self.model.parameters(), **opt_cfg)
-        else: # Default to Adam
+        else:
             optimizer = torch.optim.Adam(self.model.parameters(), **opt_cfg)
 
         sched_cfg = self.config.get('scheduler', {})
