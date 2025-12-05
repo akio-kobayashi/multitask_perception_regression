@@ -3,7 +3,8 @@
 # --- Configuration ---
 # ベースとなる設定ファイル (例: configs/config_intel_nat_cbs.yml)
 # 必要に応じて変更してください
-TAG="intel_nat_cbs"
+#TAG="intel_nat_cbs"
+TAG="intel_only"
 BASE_CONFIG=configs/config_${TAG}.yml 
 MAIN_DATA_CSV="hubert_with_listeners.csv"      # メインのデータセットCSV
 OUTPUT_ROOT_DIR=one_speaker_out_runs/${TAG}    # 各実行結果を保存するルートディレクトリ

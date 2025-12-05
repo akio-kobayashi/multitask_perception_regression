@@ -1,7 +1,7 @@
 # Train intelligibility only
 train_path: "path/to/train.csv"
 valid_path: "path/to/valid.csv"
-output_csv: "predictions.csv"
+output_csv: "predictions_intel_only.csv"
 
 batch_size: 32
 process: {num_workers: 0}
