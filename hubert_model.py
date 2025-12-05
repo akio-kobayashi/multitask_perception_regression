@@ -22,8 +22,8 @@ class OrdinalRegressionHead(nn.Module):
             nn.Linear(input_dim // 2, 1)
         )
 
-        # Learnable thresholds for ordinal classification
-        self.thresholds = nn.Parameter(torch.zeros(num_classes - 1))
+        # Learnable thresholds for ordinal classification, initialized to be ascending.
+        self.thresholds = nn.Parameter(torch.arange(num_classes - 1, dtype=torch.float32) - (num_classes - 1) / 2.0)
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
         # Get the single latent value
