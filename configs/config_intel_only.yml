@@ -28,16 +28,16 @@ optimizer:
   weight_decay: 1e-6
 
 scheduler:
-  mode: "max"
+  mode: "min"
   factor: 0.5
   patience: 3
   verbose: true
 
 checkpoint:
   dirpath: "checkpoints/intel_only"
-  filename: "{epoch}-{val_acc_intelligibility:.3f}"
-  monitor: "val_acc_intelligibility"
-  mode: "max"
+  filename: "{epoch}-{val_loss:.3f}"
+  monitor: "val_loss"
+  mode: "min"
   save_top_k: 1
 
 logger:
