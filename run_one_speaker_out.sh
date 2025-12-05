@@ -87,31 +87,34 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
     echo "Preparing config for $TARGET_SPEAKER..."
     # Copy base config and update paths
     cp "$BASE_CONFIG" "$TEMP_CONFIG"
+
+    # Use sed to update basic paths (safer for simple key-value pairs at the top level)
     # macOS と Linux の sed の違いに対応
     if [[ "$OSTYPE" == "darwin"* ]]; then # macOS
         sed -i '' "s|train_path: .*|train_path: ${TRAIN_CSV}|" "$TEMP_CONFIG"
         sed -i '' "s|valid_path: .*|valid_path: ${VALID_CSV}|" "$TEMP_CONFIG"
-        sed -i '' "s|name: multi_task_hubert|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
-        sed -i '' "s|dirpath: \"checkpoints\"|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
-        sed -i '' "s|save_dir: \"logs\"|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
-	# MODIFICATION: Use Python script to update output_csv reliably
-    python3 multitask_perception_regression/update_config.py \
-        --config_path "$TEMP_CONFIG" \
-        --output_csv_value "$PREDICTIONS_CSV"
-    # --- DEBUGGING START ---
-    echo "--- DEBUG: Content of TEMP_CONFIG after sed for speaker $TARGET_SPEAKER ---"
-    cat "$TEMP_CONFIG"
-    echo "-------------------------------------------------------------------------"
-    # --- DEBUGGING END ---
+        sed -i '' "s|name: .*|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
+        sed -i '' "s|dirpath: .*|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
+        sed -i '' "s|save_dir: .*|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
     else # Linux など
         sed -i "s|train_path: .*|train_path: ${TRAIN_CSV}|" "$TEMP_CONFIG"
         sed -i "s|valid_path: .*|valid_path: ${VALID_CSV}|" "$TEMP_CONFIG"
-        sed -i "s|name: multi_task_hubert|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
-        sed -i "s|dirpath: \"checkpoints\"|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
-        sed -i "s|save_dir: \"logs\"|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
-	sed -i "s|predictions_path: .*|predictions_path: ${PREDICTIONS_CSV}|" "$TEMP_CONFIG"	
+        sed -i "s|name: .*|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
+        sed -i "s|dirpath: .*|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
+        sed -i "s|save_dir: .*|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
     fi
 
+    # Use Python script to reliably update the output_csv path
+    echo "Updating output_csv path..."
+    python3 update_config.py \
+        --config_path "$TEMP_CONFIG" \
+        --output_csv_value "$PREDICTIONS_CSV"
+
+    # --- DEBUGGING START ---
+    echo "--- DEBUG: Content of TEMP_CONFIG for speaker $TARGET_SPEAKER ---"
+    cat "$TEMP_CONFIG"
+    echo "-----------------------------------------------------------------"
+    # --- DEBUGGING END ---
 
     # 3. Run training
     echo "Starting training for $TARGET_SPEAKER (output to $RUN_OUTPUT_DIR/logs)..."
