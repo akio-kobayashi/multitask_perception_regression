@@ -94,7 +94,15 @@ for TARGET_SPEAKER in $UNIQUE_SPEAKERS; do
         sed -i '' "s|name: multi_task_hubert|name: multi_task_hubert_${TARGET_SPEAKER}|" "$TEMP_CONFIG"
         sed -i '' "s|dirpath: \"checkpoints\"|dirpath: \"${RUN_OUTPUT_DIR}/checkpoints\"|" "$TEMP_CONFIG"
         sed -i '' "s|save_dir: \"logs\"|save_dir: \"${RUN_OUTPUT_DIR}/logs\"|" "$TEMP_CONFIG"
-	sed -i '' "s|output_csv: .*|output_csv: ${PREDICTIONS_CSV}|" "$TEMP_CONFIG"
+	# MODIFICATION: Use Python script to update output_csv reliably
+    python3 multitask_perception_regression/update_config.py \
+        --config_path "$TEMP_CONFIG" \
+        --output_csv_value "$PREDICTIONS_CSV"
+    # --- DEBUGGING START ---
+    echo "--- DEBUG: Content of TEMP_CONFIG after sed for speaker $TARGET_SPEAKER ---"
+    cat "$TEMP_CONFIG"
+    echo "-------------------------------------------------------------------------"
+    # --- DEBUGGING END ---
     else # Linux など
         sed -i "s|train_path: .*|train_path: ${TRAIN_CSV}|" "$TEMP_CONFIG"
         sed -i "s|valid_path: .*|valid_path: ${VALID_CSV}|" "$TEMP_CONFIG"
