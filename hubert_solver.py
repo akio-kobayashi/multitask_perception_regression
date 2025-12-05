@@ -68,6 +68,28 @@ class LitHubert(pl.LightningModule):
         huberts, labels_dict, lengths, indices = batch
         logits_dict = self.forward(huberts)
         loss = self._calculate_and_log_losses('train', logits_dict, labels_dict)
+
+        # --- DEBUGGING START ---
+        if batch_idx < 3:  # Print for the first 3 batches
+            print(f"\n--- Batch {batch_idx} ---")
+            print(f"Loss: {loss.item()}")
+
+            # Assuming 'intelligibility' is the main task for debugging
+            task_name = next(iter(self.tasks)) # Get the first task name
+            if task_name in logits_dict and task_name in labels_dict:
+                logits = logits_dict[task_name]
+                labels = labels_dict[task_name]
+                print(f"Task: '{task_name}'")
+                print(f"  Logits shape: {logits.shape}")
+                print(f"  Labels shape: {labels.shape}")
+                print(f"  Logits (sample[0]): {logits[0].detach().cpu().numpy()}")
+                print(f"  Labels (sample[0]): {labels[0].detach().cpu().numpy()}")
+                print(f"  Logits mean: {logits.mean().item():.4f}, std: {logits.std().item():.4f}")
+            else:
+                print(f"  Task '{task_name}' not found in logits_dict or labels_dict.")
+            print(f"-----------------")
+        # --- DEBUGGING END ---
+
         return loss
 
     def validation_step(self, batch: tuple, batch_idx: int) -> None:
