@@ -64,14 +64,24 @@ def compare_files(file1_path, file2_path):
         # --- Compare the tensors ---
         print("\n--- Comparison Result ---")
         if torch.equal(tensor1, tensor2):
-            print("‼️  IDENTICAL: The tensors in both files are exactly the same.")
+            print("✅ IDENTICAL: The tensors are exactly the same, bit for bit.")
         else:
-            print("✅ DIFFERENT: The tensors are different.")
+            print("‼️  NOT IDENTICAL: The tensors differ at a bit-level.")
+            
+            # Check if they are "close enough" within a standard tolerance
+            if torch.allclose(tensor1, tensor2):
+                print("  - ✅ However, they are VERY CLOSE in value (within tolerance).")
+                print("    This level of difference is usually negligible and caused by floating-point variations.")
+            else:
+                # If they are not even close, quantify the difference
+                abs_diff = torch.abs(tensor1 - tensor2)
+                print(f"  - ❌ The tensors are SIGNIFICANTLY DIFFERENT.")
+                print(f"    - Maximum Absolute Difference: {abs_diff.max().item():.6f}")
+                print(f"    - Mean Absolute Difference:  {abs_diff.mean().item():.6f}")
+
+            # Separately check if shapes are different, as this is a major issue
             if tensor1.shape != tensor2.shape:
-                print("  - Note: Tensor shapes are also different.")
-            # Check for small differences
-            elif torch.allclose(tensor1, tensor2):
-                 print("  - Note: Tensors are not identical, but are very close in value (allclose).")
+                print("  - ❌ CRITICAL: Tensor shapes are also different.")
 
 
     except Exception as e:
