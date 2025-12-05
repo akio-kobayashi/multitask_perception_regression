@@ -6,17 +6,33 @@ from typing import Dict, Any
 # --- Individual Head Modules ---
 
 class OrdinalRegressionHead(nn.Module):
-    """A head for ordinal regression tasks (CORAL/CORN)."""
+    """
+    A head for ordinal regression tasks (CORAL/CORN) that structurally
+    enforces ordinal constraints.
+    """
     def __init__(self, input_dim: int, num_classes: int, dropout_rate: float = 0.3):
         super().__init__()
-        self.classifier = nn.Sequential(
+        self.num_classes = num_classes
+
+        # A shared fully-connected layer to get a single latent ranking value 'g'
+        self.shared_fc = nn.Sequential(
             nn.Linear(input_dim, input_dim // 2),
             nn.ReLU(),
             nn.Dropout(dropout_rate),
-            nn.Linear(input_dim // 2, num_classes - 1)
+            nn.Linear(input_dim // 2, 1)
         )
+
+        # Learnable thresholds for ordinal classification
+        self.thresholds = nn.Parameter(torch.zeros(num_classes - 1))
+
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        return self.classifier(features)
+        # Get the single latent value
+        g = self.shared_fc(features)  # (B, 1)
+        
+        # Compare the latent value with thresholds to get logits
+        # This enforces the ordinal constraint structurally
+        logits = g.repeat(1, self.num_classes - 1) - self.thresholds.view(1, -1)
+        return logits
 
 class MultiLabelClassificationHead(nn.Module):
     """A head for multi-label classification tasks."""
